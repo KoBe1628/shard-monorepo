@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import Boss from "./Boss";
+import DamageNumber, { type DamageInstance } from "./DamageNumber"; // Import the new component
 import { Users, Activity, Trophy } from "lucide-react";
 import io from "socket.io-client";
 
@@ -22,16 +23,31 @@ function App() {
   const [bossHP, setBossHP] = useState(500);
   const [maxHP] = useState(500);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-
-  // NEW: Dynamic User State
   const [users, setUsers] = useState<User[]>([]);
+
+  // JUICE STATE 🧃
+  const [damages, setDamages] = useState<DamageInstance[]>([]);
+  const [isHit, setIsHit] = useState(false);
 
   useEffect(() => {
     socket.on("xp-event", (data) => {
       // 1. Damage Boss
       setBossHP((prev) => Math.max(0, prev - data.xp));
 
-      // 2. Add Log
+      // 2. TRIGGER JUICE (Shake + Floating Number)
+      setIsHit(true);
+      setTimeout(() => setIsHit(false), 500); // Stop shaking after 0.5s
+
+      // Add a new floating number to the array
+      const newDamage: DamageInstance = {
+        id: Date.now(),
+        value: data.xp,
+        x: (Math.random() - 0.5) * 100, // Random X offset (-50 to +50)
+        y: (Math.random() - 0.5) * 50, // Random Y offset
+      };
+      setDamages((prev) => [...prev, newDamage]);
+
+      // 3. Add Log
       const newLog = {
         id: Date.now(),
         text: `> ${data.user} ${data.message} (+${data.xp} XP)`,
@@ -39,24 +55,17 @@ function App() {
       };
       setLogs((prev) => [newLog, ...prev].slice(0, 5));
 
-      // 3. UPDATE THE ROSTER (The Magic Logic)
+      // 4. Update Roster
       setUsers((currentUsers) => {
-        // Check if user already exists
         const exists = currentUsers.find((u) => u.name === data.user);
-
         if (exists) {
-          // If yes, update their XP
           return currentUsers.map((u) => {
             if (u.name !== data.user) return u;
-
-            // Level Up Logic: Every 1000 XP = 1 Level
             const newXP = u.xp + data.xp;
             const newLevel = Math.floor(newXP / 1000) + 1;
-
             return { ...u, xp: newXP, level: newLevel };
           });
         } else {
-          // If no, add them to the list
           return [...currentUsers, { name: data.user, xp: data.xp, level: 1 }];
         }
       });
@@ -67,12 +76,16 @@ function App() {
     };
   }, []);
 
-  // Sort users by XP (Leaderboard style)
   const sortedUsers = [...users].sort((a, b) => b.xp - a.xp);
+
+  // Helper to remove numbers when animation finishes
+  const removeDamage = (id: number) => {
+    setDamages((prev) => prev.filter((d) => d.id !== id));
+  };
 
   return (
     <div className="flex h-screen w-screen bg-slate-900 text-white font-mono overflow-hidden">
-      {/* LEFT PANEL: The Guild */}
+      {/* LEFT PANEL */}
       <div className="w-1/4 bg-slate-800 border-r border-slate-700 p-6 flex flex-col transition-all">
         <div className="flex items-center gap-3 mb-8 text-cyan-400">
           <Users size={32} />
@@ -90,31 +103,24 @@ function App() {
             key={user.name}
             className="mb-4 p-4 bg-slate-700 rounded-lg flex items-center gap-4 animate-pulse-once"
           >
-            {/* Avatar Circle */}
             <div className="w-12 h-12 bg-purple-600 rounded-full flex items-center justify-center font-bold text-xl border-2 border-purple-400 relative">
               {user.name.charAt(0).toUpperCase()}
-              {/* Level Badge */}
               <div className="absolute -bottom-1 -right-1 bg-yellow-500 text-black text-[10px] w-5 h-5 flex items-center justify-center rounded-full font-bold border border-black">
                 {user.level}
               </div>
             </div>
-
-            {/* Name & Bar */}
             <div className="flex-1">
               <div className="flex justify-between items-end mb-1">
                 <h3 className="font-bold text-sm">{user.name}</h3>
                 <span className="text-xs text-purple-300">{user.xp} XP</span>
               </div>
-              {/* The XP Bar */}
               <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-cyan-400 to-purple-500 transition-all duration-1000 ease-out"
-                  style={{ width: `${(user.xp % 1000) / 10}%` }} // % of current level
+                  style={{ width: `${(user.xp % 1000) / 10}%` }}
                 ></div>
               </div>
             </div>
-
-            {/* Rank Icon for Top Player */}
             {sortedUsers.indexOf(user) === 0 && (
               <Trophy size={16} className="text-yellow-400" />
             )}
@@ -129,10 +135,15 @@ function App() {
             SPRINT 42
           </h1>
         </div>
-        <Boss hp={bossHP} maxHp={maxHP} />
+
+        {/* Pass isHit to Boss for Shake Effect */}
+        <Boss hp={bossHP} maxHp={maxHP} isHit={isHit} />
+
+        {/* Render Floating Numbers on top */}
+        <DamageNumber damages={damages} onComplete={removeDamage} />
       </div>
 
-      {/* RIGHT PANEL: Battle Log */}
+      {/* RIGHT PANEL */}
       <div className="w-1/4 bg-slate-800 border-l border-slate-700 p-6">
         <div className="flex items-center gap-3 mb-8 text-purple-400">
           <Activity size={32} />
