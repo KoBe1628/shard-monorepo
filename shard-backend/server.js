@@ -1,28 +1,29 @@
-// server.js - NOW WITH REALTIME SOCKETS
-
+require("dotenv").config(); // Load the secrets
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
-const http = require("http"); // New
-const { Server } = require("socket.io"); // New
+const http = require("http");
+const { Server } = require("socket.io");
+const { createClient } = require("@supabase/supabase-js");
+
+// 1. Connect to Supabase
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
 
 const app = express();
 const PORT = 3000;
 
-// Middleware
 app.use(cors());
 app.use(bodyParser.json());
 
-// Create the Socket Server
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: {
-    origin: "http://localhost:5173", // Allow the Frontend to connect
-    methods: ["GET", "POST"],
-  },
+  cors: { origin: "*", methods: ["GET", "POST"] },
 });
 
-// --- THE XP LOGIC ---
+// XP Logic
 function calculateXP(issue) {
   let xp = 0;
   const priority = issue.fields.priority
@@ -30,7 +31,7 @@ function calculateXP(issue) {
     : "Medium";
   const type = issue.fields.issuetype ? issue.fields.issuetype.name : "Task";
 
-  xp += 100; // Base
+  xp += 100;
   if (priority === "High") xp += 50;
   if (priority === "Critical") xp += 150;
   if (type === "Bug") xp = xp * 1.5;
@@ -38,21 +39,52 @@ function calculateXP(issue) {
   return Math.floor(xp);
 }
 
-// --- THE LISTENER ---
-app.post("/webhook", (req, res) => {
+// 2. Load Users on Start
+app.get("/users", async (req, res) => {
+  const { data, error } = await supabase.from("users").select("*");
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// 3. The Webhook Listener (Now with Memory!)
+app.post("/webhook", async (req, res) => {
   const data = req.body;
 
-  if (data.issue) {
-    const user = data.user ? data.user.displayName : "Unknown Hero";
+  if (data.issue && data.user) {
+    const userName = data.user.displayName;
     const earnedXP = calculateXP(data.issue);
 
-    console.log(
-      `⚡ EVENT: ${user} closed a ${data.issue.fields.issuetype.name} (+${earnedXP} XP)`
-    );
+    console.log(`⚡ EVENT: ${userName} earned ${earnedXP} XP`);
 
-    // 🔥 BROADCAST TO FRONTEND 🔥
+    // A. Check if user exists in DB
+    const { data: existingUser } = await supabase
+      .from("users")
+      .select("*")
+      .eq("name", userName)
+      .single();
+
+    let newXP = earnedXP;
+    let newLevel = 1;
+
+    if (existingUser) {
+      newXP = existingUser.xp + earnedXP;
+      newLevel = Math.floor(newXP / 1000) + 1;
+
+      // Update existing
+      await supabase
+        .from("users")
+        .update({ xp: newXP, level: newLevel, last_active: new Date() })
+        .eq("name", userName);
+    } else {
+      // Create new
+      await supabase
+        .from("users")
+        .insert([{ name: userName, xp: newXP, level: 1 }]);
+    }
+
+    // B. Broadcast to Frontend (Just for the visual pop)
     io.emit("xp-event", {
-      user: user,
+      user: userName,
       xp: earnedXP,
       message: `closed a ${data.issue.fields.issuetype.name}`,
     });
@@ -61,7 +93,6 @@ app.post("/webhook", (req, res) => {
   res.status(200).send("Webhook received");
 });
 
-// Start the SERVER (Note: we use 'server.listen', not 'app.listen')
 server.listen(PORT, () => {
-  console.log(`🔮 SHARD Oracle is listening on port ${PORT}`);
+  console.log(`🔮 SHARD Oracle connected to Database on port ${PORT}`);
 });

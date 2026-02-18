@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import Boss from "./Boss";
-import DamageNumber, { type DamageInstance } from "./DamageNumber"; // Import the new component
+import DamageNumber, { type DamageInstance } from "./DamageNumber";
 import { Users, Activity, Trophy } from "lucide-react";
 import io from "socket.io-client";
 
@@ -30,24 +30,42 @@ function App() {
   const [isHit, setIsHit] = useState(false);
 
   useEffect(() => {
+    // 1. FETCH HISTORY (The Memory Fix) 🧠
+    const fetchHistory = async () => {
+      try {
+        const res = await fetch("http://localhost:3000/users");
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          // Sort by XP immediately
+          const sorted = data.sort((a: User, b: User) => b.xp - a.xp);
+          setUsers(sorted);
+        }
+      } catch (err) {
+        console.error("Failed to fetch guild history:", err);
+      }
+    };
+
+    fetchHistory(); // Run immediately on load!
+
+    // 2. LISTEN FOR NEW EVENTS
     socket.on("xp-event", (data) => {
-      // 1. Damage Boss
+      // Damage Boss
       setBossHP((prev) => Math.max(0, prev - data.xp));
 
-      // 2. TRIGGER JUICE (Shake + Floating Number)
+      // Trigger Juice
       setIsHit(true);
-      setTimeout(() => setIsHit(false), 500); // Stop shaking after 0.5s
+      setTimeout(() => setIsHit(false), 500);
 
-      // Add a new floating number to the array
+      // Floating Number
       const newDamage: DamageInstance = {
         id: Date.now(),
         value: data.xp,
-        x: (Math.random() - 0.5) * 100, // Random X offset (-50 to +50)
-        y: (Math.random() - 0.5) * 50, // Random Y offset
+        x: (Math.random() - 0.5) * 100,
+        y: (Math.random() - 0.5) * 50,
       };
       setDamages((prev) => [...prev, newDamage]);
 
-      // 3. Add Log
+      // Add Log
       const newLog = {
         id: Date.now(),
         text: `> ${data.user} ${data.message} (+${data.xp} XP)`,
@@ -55,7 +73,7 @@ function App() {
       };
       setLogs((prev) => [newLog, ...prev].slice(0, 5));
 
-      // 4. Update Roster
+      // Update Roster (Optimistic Update)
       setUsers((currentUsers) => {
         const exists = currentUsers.find((u) => u.name === data.user);
         if (exists) {
@@ -76,9 +94,9 @@ function App() {
     };
   }, []);
 
+  // Sort users for display
   const sortedUsers = [...users].sort((a, b) => b.xp - a.xp);
 
-  // Helper to remove numbers when animation finishes
   const removeDamage = (id: number) => {
     setDamages((prev) => prev.filter((d) => d.id !== id));
   };
@@ -136,10 +154,7 @@ function App() {
           </h1>
         </div>
 
-        {/* Pass isHit to Boss for Shake Effect */}
         <Boss hp={bossHP} maxHp={maxHP} isHit={isHit} />
-
-        {/* Render Floating Numbers on top */}
         <DamageNumber damages={damages} onComplete={removeDamage} />
       </div>
 
