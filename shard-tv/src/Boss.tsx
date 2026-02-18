@@ -13,7 +13,7 @@ export default function Boss({ hp, maxHp, isHit }: BossProps) {
     <div className="flex flex-col items-center justify-center h-full relative">
       {/* THE BOSS (Floating Crystal) */}
       <motion.div
-        // If hit, shake! If not, just float.
+        // If hit, shake!! If not, just float.
         animate={
           isHit
             ? { x: [-10, 10, -10, 10, 0], color: "#ff0000" }
