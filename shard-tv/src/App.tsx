@@ -4,7 +4,8 @@ import DamageNumber, { type DamageInstance } from "./DamageNumber";
 import { Users, Activity, Trophy } from "lucide-react";
 import io from "socket.io-client";
 
-const socket = io("http://localhost:3000");
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
+const socket = io(BACKEND_URL);
 
 // Types
 interface LogEntry {
@@ -33,7 +34,7 @@ function App() {
     // 1. FETCH HISTORY (The Memory Fix) 🧠
     const fetchHistory = async () => {
       try {
-        const res = await fetch("http://localhost:3000/users");
+        const res = await fetch(`${BACKEND_URL}/users`);
         const data = await res.json();
         if (Array.isArray(data)) {
           // Sort by XP immediately
