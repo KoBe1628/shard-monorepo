@@ -1,4 +1,4 @@
-require("dotenv").config(); // Load the secrets
+require("dotenv").config();
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
@@ -6,14 +6,11 @@ const http = require("http");
 const { Server } = require("socket.io");
 const { createClient } = require("@supabase/supabase-js");
 
-// 1. Connect to Supabase
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
 );
-
 const app = express();
-// Render will automatically assign a PORT. If we are local, use 3000.
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
@@ -40,24 +37,25 @@ function calculateXP(issue) {
   return Math.floor(xp);
 }
 
-// 2. Load Users on Start
+// Load Users
 app.get("/users", async (req, res) => {
   const { data, error } = await supabase.from("users").select("*");
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
 });
 
-// 3. The Webhook Listener (Now with Memory!)
+// The Webhook Listener (v0.2: The Sorting Hat)
 app.post("/webhook", async (req, res) => {
   const data = req.body;
 
   if (data.issue && data.user) {
     const userName = data.user.displayName;
+    const issueType = data.issue.fields.issuetype.name;
     const earnedXP = calculateXP(data.issue);
 
     console.log(`⚡ EVENT: ${userName} earned ${earnedXP} XP`);
 
-    // A. Check if user exists in DB
+    // 1. Get existing user
     const { data: existingUser } = await supabase
       .from("users")
       .select("*")
@@ -66,28 +64,67 @@ app.post("/webhook", async (req, res) => {
 
     let newXP = earnedXP;
     let newLevel = 1;
+    let bugs = 0;
+    let features = 0;
+    let userClass = "Novice";
 
     if (existingUser) {
       newXP = existingUser.xp + earnedXP;
       newLevel = Math.floor(newXP / 1000) + 1;
-
-      // Update existing
-      await supabase
-        .from("users")
-        .update({ xp: newXP, level: newLevel, last_active: new Date() })
-        .eq("name", userName);
-    } else {
-      // Create new
-      await supabase
-        .from("users")
-        .insert([{ name: userName, xp: newXP, level: 1 }]);
+      bugs = existingUser.bugs_fixed;
+      features = existingUser.features_shipped;
+      userClass = existingUser.class;
     }
 
-    // B. Broadcast to Frontend (Just for the visual pop)
+    // 2. Count the specific stats
+    if (issueType === "Bug") {
+      bugs += 1;
+    } else {
+      features += 1;
+    }
+
+    // 3. Class Awakening Logic (Level 3+)
+    if (newLevel >= 3) {
+      if (bugs > features) {
+        userClass = "Rogue";
+      } else {
+        userClass = "Paladin";
+      }
+    }
+
+    // 4. Save to Database
+    if (existingUser) {
+      await supabase
+        .from("users")
+        .update({
+          xp: newXP,
+          level: newLevel,
+          class: userClass,
+          bugs_fixed: bugs,
+          features_shipped: features,
+          last_active: new Date(),
+        })
+        .eq("name", userName);
+    } else {
+      await supabase.from("users").insert([
+        {
+          name: userName,
+          xp: newXP,
+          level: newLevel,
+          class: userClass,
+          bugs_fixed: bugs,
+          features_shipped: features,
+        },
+      ]);
+    }
+
+    // 5. Broadcast to Frontend (Include new stats!)
     io.emit("xp-event", {
       user: userName,
       xp: earnedXP,
-      message: `closed a ${data.issue.fields.issuetype.name}`,
+      level: newLevel,
+      class: userClass, // Send the class to the TV
+      message: `closed a ${issueType}`,
     });
   }
 
@@ -95,5 +132,5 @@ app.post("/webhook", async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`🔮 SHARD Oracle connected to Database on port ${PORT}`);
+  console.log(`🔮 SHARD Oracle v0.2 connected on port ${PORT}`);
 });
