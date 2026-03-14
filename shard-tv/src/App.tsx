@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import Boss from "./Boss";
 import DamageNumber, { type DamageInstance } from "./DamageNumber";
-import { Users, Activity, Trophy, Shield, Sword, Sparkles } from "lucide-react"; // Added new icons!
+import { Users, Activity, Trophy, Shield, Sword, Sparkles } from "lucide-react";
 import io from "socket.io-client";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
@@ -18,12 +18,15 @@ interface User {
   name: string;
   xp: number;
   level: number;
-  class: string; // NEW: The RPG Class
+  class: string;
 }
 
 function App() {
-  const [bossHP, setBossHP] = useState(500);
-  const [maxHP] = useState(500);
+  // BOSS STATE (Now dynamic!)
+  const [bossName, setBossName] = useState("LOADING...");
+  const [bossHP, setBossHP] = useState(0);
+  const [maxHP, setMaxHP] = useState(1); // Default to 1 to avoid divide-by-zero errors
+
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [users, setUsers] = useState<User[]>([]);
 
@@ -32,30 +35,48 @@ function App() {
   const [isHit, setIsHit] = useState(false);
 
   useEffect(() => {
-    // 1. FETCH HISTORY
-    const fetchHistory = async () => {
+    // 1. FETCH HISTORY AND BOSS STATE
+    const fetchInitialData = async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/users`);
-        const data = await res.json();
-        if (Array.isArray(data)) {
-          const sorted = data.sort((a: User, b: User) => b.xp - a.xp);
-          // Ensure older users get 'Novice' if they don't have a class yet
+        // Fetch Users
+        const userRes = await fetch(`${BACKEND_URL}/users`);
+        const userData = await userRes.json();
+        if (Array.isArray(userData)) {
+          const sorted = userData.sort((a: User, b: User) => b.xp - a.xp);
           const typedUsers = sorted.map((u) => ({
             ...u,
             class: u.class || "Novice",
           }));
           setUsers(typedUsers);
         }
+
+        // Fetch Boss
+        const bossRes = await fetch(`${BACKEND_URL}/boss`);
+        const bossData = await bossRes.json();
+        if (bossData && bossData.name) {
+          setBossName(bossData.name);
+          setBossHP(bossData.hp);
+          setMaxHP(bossData.max_hp);
+        }
       } catch (err) {
-        console.error("Failed to fetch guild history:", err);
+        console.error("Failed to fetch initial data:", err);
       }
     };
 
-    fetchHistory();
+    fetchInitialData();
 
     // 2. LISTEN FOR NEW EVENTS
     socket.on("xp-event", (data) => {
-      setBossHP((prev) => Math.max(0, prev - data.xp));
+      // Update Boss from the server's exact math
+      if (data.boss) {
+        setBossName(data.boss.name);
+        setBossHP(data.boss.hp);
+        setMaxHP(data.boss.max_hp);
+      } else {
+        // Fallback just in case
+        setBossHP((prev) => Math.max(0, prev - data.xp));
+      }
+
       setIsHit(true);
       setTimeout(() => setIsHit(false), 500);
 
@@ -74,7 +95,6 @@ function App() {
       };
       setLogs((prev) => [newLog, ...prev].slice(0, 5));
 
-      // Update Roster with Class Data
       setUsers((currentUsers) => {
         const exists = currentUsers.find((u) => u.name === data.user);
         if (exists) {
@@ -82,7 +102,6 @@ function App() {
             if (u.name !== data.user) return u;
             const newXP = u.xp + data.xp;
             const newLevel = Math.floor(newXP / 1000) + 1;
-            // Use the class sent from the backend sorting hat!
             return {
               ...u,
               xp: newXP,
@@ -115,13 +134,12 @@ function App() {
     setDamages((prev) => prev.filter((d) => d.id !== id));
   };
 
-  // Helper to draw the right icon based on class
   const getClassIcon = (userClass: string) => {
     if (userClass === "Paladin")
       return <Shield size={16} className="text-blue-400" />;
     if (userClass === "Rogue")
       return <Sword size={16} className="text-red-400" />;
-    return <Sparkles size={16} className="text-gray-400" />; // Novice
+    return <Sparkles size={16} className="text-gray-400" />;
   };
 
   return (
@@ -152,7 +170,6 @@ function App() {
             </div>
             <div className="flex-1">
               <div className="flex justify-between items-end mb-1">
-                {/* NAME AND CLASS ICON */}
                 <h3 className="font-bold text-sm flex items-center gap-2">
                   {user.name}
                   <span title={user.class}>{getClassIcon(user.class)}</span>
@@ -176,8 +193,9 @@ function App() {
       {/* CENTER STAGE */}
       <div className="flex-1 relative bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-slate-800 via-slate-900 to-black">
         <div className="absolute top-10 w-full text-center">
-          <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500 tracking-[0.5em]">
-            SPRINT 42
+          {/* THE DYNAMIC BOSS NAME! */}
+          <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500 tracking-[0.2em] uppercase">
+            {bossName}
           </h1>
         </div>
 
@@ -191,7 +209,7 @@ function App() {
           <Activity size={32} />
           <h1 className="text-2xl font-bold tracking-widest">BATTLE LOG</h1>
         </div>
-        <div className="text-sm opacity-60 flex flex-col gap-2">
+        <div className="text-sm opacity-60 flex flex-col gap-2 overflow-y-auto max-h-[80vh]">
           {logs.map((log) => (
             <p key={log.id} className={log.color}>
               {log.text}
