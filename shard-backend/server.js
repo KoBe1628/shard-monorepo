@@ -44,7 +44,19 @@ app.get("/users", async (req, res) => {
   res.json(data);
 });
 
-// The Webhook Listener (v0.2: The Sorting Hat)
+// NEW: Load Current Boss
+app.get("/boss", async (req, res) => {
+  const { data, error } = await supabase
+    .from("active_boss")
+    .select("*")
+    .eq("status", "active")
+    .single(); // Get the single active boss
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// The Webhook Listener (v0.2.2: Persistent Boss Logic)
 app.post("/webhook", async (req, res) => {
   const data = req.body;
 
@@ -55,7 +67,7 @@ app.post("/webhook", async (req, res) => {
 
     console.log(`⚡ EVENT: ${userName} earned ${earnedXP} XP`);
 
-    // 1. Get existing user
+    // --- 1. USER LOGIC (Stats & Classes) ---
     const { data: existingUser } = await supabase
       .from("users")
       .select("*")
@@ -64,35 +76,22 @@ app.post("/webhook", async (req, res) => {
 
     let newXP = earnedXP;
     let newLevel = 1;
-    let bugs = 0;
-    let features = 0;
+    let bugs = issueType === "Bug" ? 1 : 0;
+    let features = issueType !== "Bug" ? 1 : 0;
     let userClass = "Novice";
 
     if (existingUser) {
       newXP = existingUser.xp + earnedXP;
       newLevel = Math.floor(newXP / 1000) + 1;
-      bugs = existingUser.bugs_fixed;
-      features = existingUser.features_shipped;
+      bugs += existingUser.bugs_fixed;
+      features += existingUser.features_shipped;
       userClass = existingUser.class;
     }
 
-    // 2. Count the specific stats
-    if (issueType === "Bug") {
-      bugs += 1;
-    } else {
-      features += 1;
-    }
-
-    // 3. Class Awakening Logic (Level 3+)
     if (newLevel >= 3) {
-      if (bugs > features) {
-        userClass = "Rogue";
-      } else {
-        userClass = "Paladin";
-      }
+      userClass = bugs > features ? "Rogue" : "Paladin";
     }
 
-    // 4. Save to Database
     if (existingUser) {
       await supabase
         .from("users")
@@ -118,13 +117,42 @@ app.post("/webhook", async (req, res) => {
       ]);
     }
 
-    // 5. Broadcast to Frontend (Include new stats!)
+    // --- 2. BOSS LOGIC (Damage & Persistence) ---
+    const { data: activeBoss } = await supabase
+      .from("active_boss")
+      .select("*")
+      .eq("status", "active")
+      .single();
+
+    let newBossHP = 500;
+    let bossName = "UNKNOWN BOSS";
+    let bossMaxHP = 500;
+
+    if (activeBoss) {
+      // Subtract XP from Boss HP, but don't let it go below 0
+      newBossHP = Math.max(0, activeBoss.hp - earnedXP);
+      bossName = activeBoss.name;
+      bossMaxHP = activeBoss.max_hp;
+
+      // Save the new HP to the database
+      await supabase
+        .from("active_boss")
+        .update({ hp: newBossHP })
+        .eq("id", activeBoss.id);
+    }
+
+    // --- 3. BROADCAST TO TV ---
     io.emit("xp-event", {
       user: userName,
       xp: earnedXP,
       level: newLevel,
-      class: userClass, // Send the class to the TV
+      class: userClass,
       message: `closed a ${issueType}`,
+      boss: {
+        name: bossName,
+        hp: newBossHP,
+        max_hp: bossMaxHP,
+      },
     });
   }
 
@@ -132,5 +160,5 @@ app.post("/webhook", async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`🔮 SHARD Oracle v0.2 connected on port ${PORT}`);
+  console.log(`🔮 SHARD Oracle connected on port ${PORT}`);
 });
