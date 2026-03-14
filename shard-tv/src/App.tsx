@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import Boss from "./Boss";
 import DamageNumber, { type DamageInstance } from "./DamageNumber";
-import { Users, Activity, Trophy } from "lucide-react";
+import { Users, Activity, Trophy, Shield, Sword, Sparkles } from "lucide-react"; // Added new icons!
 import io from "socket.io-client";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
@@ -18,6 +18,7 @@ interface User {
   name: string;
   xp: number;
   level: number;
+  class: string; // NEW: The RPG Class
 }
 
 function App() {
@@ -31,33 +32,33 @@ function App() {
   const [isHit, setIsHit] = useState(false);
 
   useEffect(() => {
-    // 1. FETCH HISTORY (The Memory Fix) 🧠
+    // 1. FETCH HISTORY
     const fetchHistory = async () => {
       try {
         const res = await fetch(`${BACKEND_URL}/users`);
         const data = await res.json();
         if (Array.isArray(data)) {
-          // Sort by XP immediately
           const sorted = data.sort((a: User, b: User) => b.xp - a.xp);
-          setUsers(sorted);
+          // Ensure older users get 'Novice' if they don't have a class yet
+          const typedUsers = sorted.map((u) => ({
+            ...u,
+            class: u.class || "Novice",
+          }));
+          setUsers(typedUsers);
         }
       } catch (err) {
         console.error("Failed to fetch guild history:", err);
       }
     };
 
-    fetchHistory(); // Run immediately on load!
+    fetchHistory();
 
     // 2. LISTEN FOR NEW EVENTS
     socket.on("xp-event", (data) => {
-      // Damage Boss
       setBossHP((prev) => Math.max(0, prev - data.xp));
-
-      // Trigger Juice
       setIsHit(true);
       setTimeout(() => setIsHit(false), 500);
 
-      // Floating Number
       const newDamage: DamageInstance = {
         id: Date.now(),
         value: data.xp,
@@ -66,7 +67,6 @@ function App() {
       };
       setDamages((prev) => [...prev, newDamage]);
 
-      // Add Log
       const newLog = {
         id: Date.now(),
         text: `> ${data.user} ${data.message} (+${data.xp} XP)`,
@@ -74,7 +74,7 @@ function App() {
       };
       setLogs((prev) => [newLog, ...prev].slice(0, 5));
 
-      // Update Roster (Optimistic Update)
+      // Update Roster with Class Data
       setUsers((currentUsers) => {
         const exists = currentUsers.find((u) => u.name === data.user);
         if (exists) {
@@ -82,10 +82,24 @@ function App() {
             if (u.name !== data.user) return u;
             const newXP = u.xp + data.xp;
             const newLevel = Math.floor(newXP / 1000) + 1;
-            return { ...u, xp: newXP, level: newLevel };
+            // Use the class sent from the backend sorting hat!
+            return {
+              ...u,
+              xp: newXP,
+              level: newLevel,
+              class: data.class || u.class,
+            };
           });
         } else {
-          return [...currentUsers, { name: data.user, xp: data.xp, level: 1 }];
+          return [
+            ...currentUsers,
+            {
+              name: data.user,
+              xp: data.xp,
+              level: 1,
+              class: data.class || "Novice",
+            },
+          ];
         }
       });
     });
@@ -95,11 +109,19 @@ function App() {
     };
   }, []);
 
-  // Sort users for display
   const sortedUsers = [...users].sort((a, b) => b.xp - a.xp);
 
   const removeDamage = (id: number) => {
     setDamages((prev) => prev.filter((d) => d.id !== id));
+  };
+
+  // Helper to draw the right icon based on class
+  const getClassIcon = (userClass: string) => {
+    if (userClass === "Paladin")
+      return <Shield size={16} className="text-blue-400" />;
+    if (userClass === "Rogue")
+      return <Sword size={16} className="text-red-400" />;
+    return <Sparkles size={16} className="text-gray-400" />; // Novice
   };
 
   return (
@@ -130,7 +152,11 @@ function App() {
             </div>
             <div className="flex-1">
               <div className="flex justify-between items-end mb-1">
-                <h3 className="font-bold text-sm">{user.name}</h3>
+                {/* NAME AND CLASS ICON */}
+                <h3 className="font-bold text-sm flex items-center gap-2">
+                  {user.name}
+                  <span title={user.class}>{getClassIcon(user.class)}</span>
+                </h3>
                 <span className="text-xs text-purple-300">{user.xp} XP</span>
               </div>
               <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
